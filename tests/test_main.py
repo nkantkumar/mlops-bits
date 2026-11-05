@@ -9,7 +9,8 @@ def test_simple_assertion() -> None:
 
 
 def test_main(capsys: pytest.CaptureFixture[str]) -> None:
-    """Test that main() prints the expected greeting."""
-    main()
+    """Test that main() prints the expected greeting and executes benchmark."""
+    main([])
     captured = capsys.readouterr()
     assert "Hello from mlops-bits!" in captured.out
+    assert "BENCHMARK RESULTS" in captured.out

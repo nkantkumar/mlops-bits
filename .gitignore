@@ -14,3 +14,9 @@ wheels/
 .ruff_cache/
 .mypy_cache/
 
+# IDE and editors
+.idea/
+.vscode/
+*.swp
+
+
