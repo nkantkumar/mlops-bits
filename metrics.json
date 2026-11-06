@@ -1,0 +1,15 @@
+{
+  "total_transactions": 1000,
+  "fraud_count": 50,
+  "approval_rate": 0.95,
+  "review_rate": 0.0,
+  "reject_rate": 0.05,
+  "mean_latency_ms": 0.0027,
+  "p95_latency_ms": 0.003,
+  "p99_latency_ms": 0.0043,
+  "throughput_req_per_s": 326962.2,
+  "sla_passed": true,
+  "amount_psi": 0.1599,
+  "drift_status": "MODERATE_DRIFT",
+  "drift_alert": false
+}

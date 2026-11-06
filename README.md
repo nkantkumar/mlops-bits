@@ -1,6 +1,6 @@
 # mlops-bits: Enterprise Fraud Detection Module
 
-Production-grade, low-latency fraud detection module and statistical drift monitoring engineered for enterprise MLOps. Packaged deterministically using [`uv`](https://docs.astral.sh/uv/) and served via FastAPI.
+Production-grade, low-latency fraud detection module and statistical drift monitoring engineered for enterprise MLOps. Packaged deterministically using [`uv`](https://docs.astral.sh/uv/) and versioned with [DVC](https://dvc.org/).
 
 ---
 
@@ -17,8 +17,9 @@ Production-grade, low-latency fraud detection module and statistical drift monit
   - $\text{PSI} < 0.10$: `NO_DRIFT`
   - $0.10 \le \text{PSI} < 0.25$: `MODERATE_DRIFT`
   - $\text{PSI} \ge 0.25$: `SIGNIFICANT_DRIFT` (triggers automated alert)
+- **Data Version Control (DVC)**: Reproducible MLOps pipeline tracking data generation, model evaluation, metrics, and Google Drive remote storage.
 - **Deterministic Packaging & Build**: Modern PEP 517/621 packaging with `pyproject.toml`, pinned lockfile `uv.lock`, and distribution builds (`uv build`).
-- **Rigorous Testing**: 22 comprehensive pytest tests covering unit logic, boundary validations, drift thresholds, and sub-millisecond SLA performance.
+- **Rigorous Testing**: 25 comprehensive pytest tests covering unit logic, boundary validations, drift thresholds, pipeline stages, and sub-millisecond SLA performance.
 
 ---
 
@@ -26,6 +27,7 @@ Production-grade, low-latency fraud detection module and statistical drift monit
 
 - **Python**: `>= 3.14`
 - **uv**: `>= 0.12`
+- **DVC**: `>= 3.67` (included via dev dependencies `dvc` and `dvc-gdrive`)
 
 To install `uv`:
 
@@ -51,6 +53,72 @@ uv sync
 
 ---
 
+## Data Version Control (DVC) Pipeline
+
+The repository integrates DVC for reproducible data preparation, experiment tracking, and remote storage.
+
+### 1. DVC Pipeline Stages (`dvc.yaml`)
+
+```text
++---------+  
+| prepare |  
++---------+  
+      *      
+      *      
+      *      
++----------+ 
+| evaluate | 
++----------+ 
+```
+
+- **`prepare`**: Deterministically generates raw transaction datasets into `data/raw/transactions.csv` based on `params.yaml`.
+- **`evaluate`**: Evaluates dataset through `LowLatencyFraudDetector` and `DistributionDriftMonitor`, recording metrics to `metrics.json`.
+
+### 2. Run DVC Pipeline
+
+```bash
+# Execute the full pipeline (or only changed stages)
+uv run dvc repro
+
+# View pipeline DAG
+uv run dvc dag
+
+# Inspect performance and drift metrics
+uv run dvc metrics show
+
+# Inspect parameter differences
+uv run dvc params diff
+```
+
+Sample metrics output:
+```text
+Path          amount_psi    approval_rate    drift_alert    drift_status    fraud_count    mean_latency_ms    p95_latency_ms    p99_latency_ms    reject_rate    review_rate    sla_passed    throughput_req_per_s    total_transactions
+metrics.json  0.1599        0.95             False          MODERATE_DRIFT  50             0.0027             0.0030            0.0043            0.05           0.0            True          326962.2                1000
+```
+
+### 3. Remote Storage (Google Drive)
+
+Remote storage is configured in `.dvc/config`:
+
+```ini
+[core]
+    remote = myremote
+['remote "myremote"']
+    url = gdrive://dvc-workspace
+```
+
+To sync data with remote storage:
+
+```bash
+# Push tracked data to Google Drive
+uv run dvc push
+
+# Pull tracked data from Google Drive
+uv run dvc pull
+```
+
+---
+
 ## Execution & Serving
 
 ### 1. Run Built-In Low-Latency Benchmark
@@ -59,23 +127,6 @@ Verify strict latency SLA directly from the CLI:
 
 ```bash
 uv run mlops-bits benchmark --samples 1000
-```
-
-Sample output:
-```text
-🚀 Running benchmark with 1,000 synthetic transactions...
-=======================================================
-📊 BENCHMARK RESULTS (Low-Latency Inference SLA)
-=======================================================
-Total Transactions Scored : 1,000
-Total Execution Time      : 0.005 s
-Throughput                : 211,504.0 req/s
-Mean Latency              : 0.0013 ms
-p50 Median Latency        : 0.0011 ms
-p95 Latency               : 0.0013 ms
-p99 Latency               : 0.0022 ms
-=======================================================
-✅ Low-latency SLA PASSED (< 5.0ms p99)
 ```
 
 ### 2. Start FastAPI Production Server
@@ -123,7 +174,7 @@ Response:
 ## Testing & Validation
 
 ```bash
-# Run full pytest suite (unit logic, drift, latency SLA, API)
+# Run full pytest suite (unit logic, drift, latency SLA, API, pipeline)
 uv run pytest -v
 
 # Run only latency benchmark tests
@@ -131,6 +182,9 @@ uv run pytest tests/test_latency.py -v
 
 # Run only drift & distribution tests
 uv run pytest tests/test_drift.py -v
+
+# Run only DVC pipeline stage tests
+uv run pytest tests/test_pipeline.py -v
 ```
 
 ---
@@ -157,6 +211,13 @@ uv build
 
 ```text
 mlops-bits/
+├── .dvc/
+│   ├── config               # DVC remote configuration (Google Drive)
+│   └── .gitignore           # Ignores local DVC cache and credentials
+├── data/
+│   └── raw/
+│       ├── .gitignore       # DVC auto-generated (ignores transactions.csv in Git)
+│       └── transactions.csv # Versioned data artifact
 ├── src/
 │   └── mlops_bits/
 │       ├── __init__.py      # Public exports and entry points
@@ -165,7 +226,11 @@ mlops-bits/
 │       ├── config.py        # Decision thresholds and SLA parameters
 │       ├── detector.py      # Sub-millisecond fraud scoring engine
 │       ├── drift.py         # PSI distribution drift monitor
-│       └── schemas.py       # Pydantic v2 schemas and boundary validations
+│       ├── schemas.py       # Pydantic v2 schemas and boundary validations
+│       └── pipeline/
+│           ├── __init__.py
+│           ├── prepare.py   # DVC stage: reproducible transaction generation
+│           └── evaluate.py  # DVC stage: model evaluation & PSI metrics
 ├── tests/
 │   ├── __init__.py
 │   ├── conftest.py          # Shared fixtures (transactions & distributions)
@@ -173,8 +238,13 @@ mlops-bits/
 │   ├── test_detector.py     # Unit logic and boundary constraint tests
 │   ├── test_drift.py        # Statistical drift and PSI tests
 │   ├── test_latency.py      # Low-latency SLA benchmarks (<5ms p99)
+│   ├── test_pipeline.py     # DVC pipeline stage unit tests
 │   └── test_main.py         # CLI sanity test
-├── pyproject.toml           # Project packaging & pytest/ruff/mypy config
+├── dvc.yaml                 # DVC pipeline definition (prepare -> evaluate)
+├── dvc.lock                 # Cryptographic pipeline state lockfile
+├── params.yaml              # Hyperparameters and pipeline configuration
+├── metrics.json             # DVC evaluation metrics artifact
+├── pyproject.toml           # Project packaging & dependencies
 ├── uv.lock                  # Deterministic lockfile
 └── README.md
 ```

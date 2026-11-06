@@ -9,6 +9,7 @@ authors = [
 requires-python = ">=3.14"
 dependencies = [
     "fastapi>=0.162.0",
+    "pyyaml>=6.0.3",
     "uvicorn>=0.54.0",
 ]
 
@@ -21,10 +22,13 @@ build-backend = "uv_build"
 
 [dependency-groups]
 dev = [
+    "dvc>=3.67.1",
+    "dvc-gdrive>=3.0.1",
     "httpx>=0.28.1",
     "mypy>=2.4.1",
     "pytest>=9.2.0",
     "ruff>=0.17.3",
+    "types-pyyaml>=6.0.12.20261103",
 ]
 
 [tool.pytest.ini_options]

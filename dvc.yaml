@@ -1,0 +1,27 @@
+stages:
+  prepare:
+    cmd: uv run python -m mlops_bits.pipeline.prepare
+    deps:
+      - src/mlops_bits/pipeline/prepare.py
+    params:
+      - prepare.fraud_ratio
+      - prepare.num_samples
+      - prepare.output_path
+      - prepare.random_seed
+    outs:
+      - data/raw/transactions.csv
+
+  evaluate:
+    cmd: uv run python -m mlops_bits.pipeline.evaluate
+    deps:
+      - data/raw/transactions.csv
+      - src/mlops_bits/detector.py
+      - src/mlops_bits/drift.py
+      - src/mlops_bits/pipeline/evaluate.py
+    params:
+      - evaluate.drift_num_bins
+      - evaluate.input_path
+      - evaluate.metrics_output
+    metrics:
+      - metrics.json:
+          cache: false

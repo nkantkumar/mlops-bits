@@ -1,0 +1,49 @@
+schema: '2.0'
+stages:
+  prepare:
+    cmd: uv run python -m mlops_bits.pipeline.prepare
+    deps:
+    - path: src/mlops_bits/pipeline/prepare.py
+      hash: md5
+      md5: bab97b5e43b75b87145c5cc7333688d8
+      size: 3692
+    params:
+      params.yaml:
+        prepare.fraud_ratio: 0.05
+        prepare.num_samples: 1000
+        prepare.output_path: data/raw/transactions.csv
+        prepare.random_seed: 42
+    outs:
+    - path: data/raw/transactions.csv
+      hash: md5
+      md5: c951e4912c2e2285f3e3014f26a8d8cb
+      size: 80638
+  evaluate:
+    cmd: uv run python -m mlops_bits.pipeline.evaluate
+    deps:
+    - path: data/raw/transactions.csv
+      hash: md5
+      md5: c951e4912c2e2285f3e3014f26a8d8cb
+      size: 80638
+    - path: src/mlops_bits/detector.py
+      hash: md5
+      md5: e12b10c91ef56100bfac924b3307a84f
+      size: 5101
+    - path: src/mlops_bits/drift.py
+      hash: md5
+      md5: 0d67ea0d0df186452a32a1c95692ab02
+      size: 3786
+    - path: src/mlops_bits/pipeline/evaluate.py
+      hash: md5
+      md5: 8d6953c6994156e1958dbca554059381
+      size: 5178
+    params:
+      params.yaml:
+        evaluate.drift_num_bins: 10
+        evaluate.input_path: data/raw/transactions.csv
+        evaluate.metrics_output: metrics.json
+    outs:
+    - path: metrics.json
+      hash: md5
+      md5: 768444625f7f48698850275c2025b0eb
+      size: 349

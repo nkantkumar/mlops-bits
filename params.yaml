@@ -1,0 +1,10 @@
+prepare:
+  num_samples: 1000
+  fraud_ratio: 0.05
+  random_seed: 42
+  output_path: "data/raw/transactions.csv"
+
+evaluate:
+  input_path: "data/raw/transactions.csv"
+  drift_num_bins: 10
+  metrics_output: "metrics.json"
