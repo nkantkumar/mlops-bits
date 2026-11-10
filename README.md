@@ -204,11 +204,47 @@ uv run mypy src tests
 # Build deterministic wheel and source distribution
 uv build
 ```
-mlops-bits % uv run mlflow server \
+
+---
+
+## MLflow Experiment Tracking
+
+The repository includes a dedicated `experiments/` module that benchmarks and logs comparative machine learning models to [MLflow](https://mlflow.org/).
+
+### 1. Evaluated Models
+
+- **`LowLatencyFraudDetector-CalibratedEngine`**: Sub-millisecond rule and calibrated sigmoid logit engine.
+- **`LogisticRegression-L2-Balanced`**: Scaled linear baseline model with L2 regularization.
+- **`RandomForest-Ensemble-Depth6`**: Non-linear ensemble model with tree-based importance and probability calibration.
+
+### 2. Run Experiments
+
+```bash
+# Run comparative experiment suite across all models
+uv run python -m experiments.run_experiment
+
+# Or via CLI subcommand
+uv run mlops-bits experiment --experiment-name fraud-detection
+
+# Run specific models with custom parameters
+uv run python experiments/run_experiment.py \
+  --experiment-name fraud-detection \
+  --models detector logistic_regression \
+  --test-size 0.30
+```
+
+### 3. Launch MLflow Tracking UI
+
+```bash
+uv run mlflow server \
   --backend-store-uri sqlite:///mlflow.db \
   --default-artifact-root ./mlartifacts \
   --host 127.0.0.1 \
   --port 5000
+```
+
+Open **http://127.0.0.1:5000** to compare runs, inspect parameters, metrics (ROC-AUC, PR-AUC, F1, latency p99), diagnostic plots (`confusion_matrix.png`, `roc_curve.png`), and packaged model artifacts.
+
 ---
 
 ## Project Structure
@@ -222,11 +258,15 @@ mlops-bits/
 │   └── raw/
 │       ├── .gitignore       # DVC auto-generated (ignores transactions.csv in Git)
 │       └── transactions.csv # Versioned data artifact
+├── experiments/
+│   ├── __init__.py          # Experiment module exports
+│   ├── run_experiment.py    # MLflow experiment runner, feature pipeline & models
+│   └── README.md            # Experiment tracking guide and documentation
 ├── src/
 │   └── mlops_bits/
 │       ├── __init__.py      # Public exports and entry points
 │       ├── api.py           # FastAPI production application
-│       ├── cli.py           # CLI runner (benchmark & serve)
+│       ├── cli.py           # CLI runner (benchmark, serve, experiment)
 │       ├── config.py        # Decision thresholds and SLA parameters
 │       ├── detector.py      # Sub-millisecond fraud scoring engine
 │       ├── drift.py         # PSI distribution drift monitor
@@ -241,6 +281,7 @@ mlops-bits/
 │   ├── test_api.py          # FastAPI endpoint integration tests
 │   ├── test_detector.py     # Unit logic and boundary constraint tests
 │   ├── test_drift.py        # Statistical drift and PSI tests
+│   ├── test_experiments.py  # MLflow experiment tracking & logging tests
 │   ├── test_latency.py      # Low-latency SLA benchmarks (<5ms p99)
 │   ├── test_pipeline.py     # DVC pipeline stage unit tests
 │   └── test_main.py         # CLI sanity test
@@ -248,6 +289,7 @@ mlops-bits/
 ├── dvc.lock                 # Cryptographic pipeline state lockfile
 ├── params.yaml              # Hyperparameters and pipeline configuration
 ├── metrics.json             # DVC evaluation metrics artifact
+├── mlflow.db                # SQLite MLflow tracking backend
 ├── pyproject.toml           # Project packaging & dependencies
 ├── uv.lock                  # Deterministic lockfile
 └── README.md

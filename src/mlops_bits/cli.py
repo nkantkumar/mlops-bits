@@ -98,6 +98,40 @@ def main(argv: list[str] | None = None) -> None:
         help="Number of benchmark iterations (default: 1000)",
     )
 
+    # Experiment command
+    exp_parser = subparsers.add_parser(
+        "experiment", help="Run and log fraud detection experiments to MLflow"
+    )
+    exp_parser.add_argument(
+        "--experiment-name",
+        default="fraud-detection",
+        help="MLflow experiment name (default: fraud-detection)",
+    )
+    exp_parser.add_argument(
+        "--tracking-uri",
+        default="sqlite:///mlflow.db",
+        help="MLflow tracking URI (default: sqlite:///mlflow.db)",
+    )
+    exp_parser.add_argument(
+        "--models",
+        nargs="+",
+        default=["detector", "logistic_regression", "random_forest"],
+        choices=["detector", "logistic_regression", "random_forest"],
+        help="Models to evaluate and log",
+    )
+    exp_parser.add_argument(
+        "--test-size",
+        type=float,
+        default=0.25,
+        help="Test split fraction (default: 0.25)",
+    )
+    exp_parser.add_argument(
+        "--seed",
+        type=int,
+        default=42,
+        help="Random seed for reproducibility (default: 42)",
+    )
+
     args = parser.parse_args(argv)
 
     if args.command == "benchmark":
@@ -108,6 +142,22 @@ def main(argv: list[str] | None = None) -> None:
         print(f"Starting server on {args.host}:{args.port}...")
         uvicorn.run(
             "mlops_bits.api:app", host=args.host, port=args.port, reload=args.reload
+        )
+    elif args.command == "experiment":
+        from pathlib import Path
+
+        repo_root = str(Path(__file__).resolve().parent.parent.parent)
+        if repo_root not in sys.path:
+            sys.path.insert(0, repo_root)
+
+        from experiments.run_experiment import run_all_experiments
+
+        run_all_experiments(
+            experiment_name=args.experiment_name,
+            tracking_uri=args.tracking_uri,
+            models=args.models,
+            test_size=args.test_size,
+            seed=args.seed,
         )
     else:
         # Default behavior when run with no arguments: print greeting and quick benchmark

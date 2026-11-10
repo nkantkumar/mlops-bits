@@ -19,4 +19,6 @@ wheels/
 .vscode/
 *.swp
 
-
+# MLflow
+mlruns/
+mlartifacts/
