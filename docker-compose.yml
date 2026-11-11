@@ -1,0 +1,125 @@
+services:
+  # ===========================================================================
+  # 1. Portainer: Visual Container Management & Stack Deployment
+  # ===========================================================================
+  portainer:
+    image: portainer/portainer-ce:2.21.5
+    container_name: mlops_portainer
+    restart: always
+    ports:
+      - "9000:9000"
+      - "9443:9443"
+    volumes:
+      - "/var/run/docker.sock:/var/run/docker.sock"
+      - "portainer_data:/data"
+    networks:
+      - mlops_network
+
+  # ===========================================================================
+  # 2. Redis: In-Memory Message Broker & Asynchronous Job Storage
+  # ===========================================================================
+  redis:
+    image: redis:7.4-alpine
+    container_name: mlops_redis
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    command: redis-server --appendonly yes
+    volumes:
+      - "redis_data:/data"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+    networks:
+      - mlops_network
+
+  # ===========================================================================
+  # 3. Model Champion: Low-Latency Production Scoring Microservice
+  # ===========================================================================
+  model-champion:
+    build:
+      context: .
+      dockerfile: Dockerfile.model
+      args:
+        MODEL_PORT: 8001
+    container_name: mlops_model_champion
+    restart: unless-stopped
+    environment:
+      - MODEL_PORT=8001
+      - MODEL_VARIANT=champion
+    ports:
+      - "8001:8001"
+    networks:
+      - mlops_network
+
+  # ===========================================================================
+  # 4. Model Challenger: Candidate Model Microservice (Canary / Variant B)
+  # ===========================================================================
+  model-challenger:
+    build:
+      context: .
+      dockerfile: Dockerfile.model
+      args:
+        MODEL_PORT: 8002
+    container_name: mlops_model_challenger
+    restart: unless-stopped
+    environment:
+      - MODEL_PORT=8002
+      - MODEL_VARIANT=challenger
+    ports:
+      - "8002:8002"
+    networks:
+      - mlops_network
+
+  # ===========================================================================
+  # 5. Unified API Gateway: A/B Testing, Canary Rollouts, & Smart Routing
+  # ===========================================================================
+  gateway:
+    build:
+      context: .
+      dockerfile: Dockerfile.gateway
+    container_name: mlops_api_gateway
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    environment:
+      - PORT=8000
+      - CHAMPION_SERVICE_URL=http://model-champion:8001
+      - CHALLENGER_SERVICE_URL=http://model-challenger:8002
+      - REDIS_URL=redis://redis:6379/0
+    depends_on:
+      redis:
+        condition: service_healthy
+      model-champion:
+        condition: service_started
+      model-challenger:
+        condition: service_started
+    networks:
+      - mlops_network
+
+  # ===========================================================================
+  # 6. Redis Async Worker: High-Throughput Background Prediction Consumer
+  # ===========================================================================
+  async-worker:
+    build:
+      context: .
+      dockerfile: Dockerfile.worker
+    container_name: mlops_async_worker
+    restart: unless-stopped
+    environment:
+      - REDIS_URL=redis://redis:6379/0
+    depends_on:
+      redis:
+        condition: service_healthy
+    networks:
+      - mlops_network
+
+volumes:
+  portainer_data:
+  redis_data:
+
+networks:
+  mlops_network:
+    driver: bridge

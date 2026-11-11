@@ -247,50 +247,198 @@ Open **http://127.0.0.1:5000** to compare runs, inspect parameters, metrics (ROC
 
 ---
 
+## Production Model Serving & Deployment Patterns
+
+`mlops-bits` provides an enterprise-ready model serving architecture featuring BentoML packaging, Portainer container management, A/B testing, Redis async prediction workers, a Unified API Gateway, and Canary rollout with automated circuit-breaker rollback.
+
+```
+                           ┌──────────────────────────────┐
+                           │   Unified API Gateway        │
+                           │   (FastAPI on Port 8000)     │
+                           └──────────────┬───────────────┘
+                                          │
+            ┌─────────────────────────────┼─────────────────────────────┐
+            │ [Dynamic Router]            │                             │
+            ▼                             ▼                             ▼
+   ┌──────────────────┐          ┌──────────────────┐          ┌──────────────────┐
+   │ Model Champion   │          │ Model Challenger │          │ Redis Queue      │
+   │ (Port 8001)      │          │ (Port 8002)      │          │ (Port 6379)      │
+   └──────────────────┘          └──────────────────┘          └────────┬─────────┘
+                                                                        │
+                                                                        ▼
+                                                               ┌──────────────────┐
+                                                               │ Async Worker     │
+                                                               │ (Low-Latency)    │
+                                                               └──────────────────┘
+```
+
+### 1. Package a Model as a BentoML Service
+
+Model serving is packaged using BentoML 1.4 (`serving/bentoml/`):
+- `serving/bentoml/service.py`: Self-contained `@bentoml.service` exposing `/predict`, `/predict_batch`, and `/health` APIs.
+- `serving/bentoml/bentofile.yaml`: Bento packaging recipe bundling models and dependencies into a standard OCI container.
+
+```bash
+# Serve BentoML model service locally
+uv run bentoml serve serving.bentoml.service:FraudDetectionService --port 3000
+
+# Build production Bento bundle
+uv run bentoml build -f serving/bentoml/bentofile.yaml serving/bentoml
+```
+
+### 2. Unified API Gateway & Multi-Model Serving
+
+The API Gateway (`serving/gateway/app.py`) provides a single, unified entry point for all client scoring traffic:
+- **`POST /v1/predict`**: Dynamic smart router routing to Champion or Challenger with zero downtime.
+- **`POST /v1/predict/async`**: Non-blocking asynchronous job submission.
+- **`GET /v1/predict/job/{job_id}`**: Polling endpoint for job status and completed prediction payload.
+- **`POST /v1/models/compare`**: Side-by-side comparative inference benchmarking across both models simultaneously.
+- **`POST /v1/admin/routing`**: Live router mode switching (`default`, `ab_test`, `canary`).
+- **`POST /v1/admin/canary/weight`**: Live canary traffic weight adjustment (`0.0` to `1.0`).
+- **`POST /v1/admin/ab-test/split`**: Live A/B traffic split adjustment.
+
+```bash
+# Start Gateway locally
+uv run mlops-bits gateway --port 8000
+```
+
+### 3. Implement A/B Testing for Model Deployment
+
+Deterministic cohort assignment via `MD5(user_id + salt) % 100` ensures sticky sessions:
+- Any given `user_id` consistently routes to the exact same model variant across repeated transactions.
+- Traffic split ratios can be configured on the fly via admin endpoints.
+
+```bash
+# Run automated A/B test simulation (verifies 50/50 split and 100% user stickiness)
+uv run mlops-bits simulate ab-test
+```
+
+### 4. Simulate a Canary Rollout with Auto-Rollback
+
+Automated canary rollout progressively routes live traffic to the candidate model while monitoring error rates and latency SLA (< 5.0ms p95):
+1. **Stage 0**: Baseline (100% Champion / 0% Canary)
+2. **Stage 1**: Initial Canary (10% Traffic)
+3. **Stage 2**: Expanded Canary (25% Traffic)
+4. **Stage 3**: Balanced Canary (50% Traffic)
+5. **Stage 4**: Full Promotion (100% Canary)
+- **Automated Circuit Breaker**: If canary latency degrades or error rate spikes, the gateway automatically rolls traffic back to 100% Champion with zero dropped requests.
+
+```bash
+# Run Canary rollout simulation with visual ASCII progress bars and auto-rollback
+uv run mlops-bits simulate canary
+```
+
+### 5. Async Predictions with Redis-Backed Worker
+
+For non-blocking high-volume ingestion:
+- Transactions are enqueued onto Redis (`mlops:queue:predictions`) using `LPUSH` / `BLPOP`.
+- Background worker (`serving/async_worker/worker.py`) consumes and scores transactions with sub-millisecond throughput.
+- Includes automatic fallback to an in-memory queue if Redis is temporarily unreachable.
+
+```bash
+# Start the async worker daemon
+uv run mlops-bits worker
+```
+
+### 6. Production Model Serving with Docker Compose & Portainer
+
+A complete multi-container production stack is defined in [`docker-compose.yml`](file:///Users/nishi/Documents/GitHub/mlops-bits/docker-compose.yml):
+
+| Service | Port | Image / Context | Purpose |
+| :--- | :--- | :--- | :--- |
+| **`portainer`** | `:9000` | `portainer/portainer-ce:latest` | Container Management GUI |
+| **`gateway`** | `:8000` | `Dockerfile.gateway` | Unified API Gateway & Smart Router |
+| **`model-champion`** | `:8001` | `Dockerfile.model` | Baseline Production Scorer |
+| **`model-challenger`**| `:8002` | `Dockerfile.model` | Candidate Model Variant |
+| **`redis`** | `:6379` | `redis:7-alpine` | Async Prediction Job Queue |
+| **`async-worker`** | N/A | `Dockerfile.worker` | Background Processing Engine |
+
+#### Deploying with Docker Compose:
+
+```bash
+# Build and start all services in detached mode
+docker compose up -d --build
+
+# Inspect running services
+docker compose ps
+
+# View gateway logs
+docker compose logs -f gateway
+```
+
+#### Managing via Portainer:
+1. Open your browser to **http://localhost:9000**.
+2. Set your admin credentials upon initial launch.
+3. Access the **local** Docker environment to monitor container health, restart services, inspect logs, and manage CPU/memory allocations visually.
+
+---
+
 ## Project Structure
 
 ```text
 mlops-bits/
 ├── .dvc/
-│   ├── config               # DVC remote configuration (Google Drive)
-│   └── .gitignore           # Ignores local DVC cache and credentials
+│   ├── config                  # DVC remote configuration (Google Drive)
+│   └── .gitignore              # Ignores local DVC cache and credentials
 ├── data/
 │   └── raw/
-│       ├── .gitignore       # DVC auto-generated (ignores transactions.csv in Git)
-│       └── transactions.csv # Versioned data artifact
+│       ├── .gitignore          # DVC auto-generated (ignores transactions.csv in Git)
+│       └── transactions.csv    # Versioned data artifact
 ├── experiments/
-│   ├── __init__.py          # Experiment module exports
-│   ├── run_experiment.py    # MLflow experiment runner, feature pipeline & models
-│   └── README.md            # Experiment tracking guide and documentation
+│   ├── __init__.py             # Experiment module exports
+│   ├── run_experiment.py       # MLflow experiment runner, feature pipeline & models
+│   └── README.md               # Experiment tracking guide and documentation
+├── serving/
+│   ├── bentoml/
+│   │   ├── bentofile.yaml      # BentoML 1.4 build specification
+│   │   └── service.py          # BentoML FraudDetectionService definition
+│   ├── async_worker/
+│   │   ├── __init__.py
+│   │   ├── queue.py            # Redis queue manager with in-memory fallback
+│   │   └── worker.py           # Background prediction consumer daemon
+│   ├── gateway/
+│   │   ├── __init__.py
+│   │   ├── app.py              # FastAPI Unified API Gateway application
+│   │   ├── models_client.py    # Multi-model client (Champion / Challenger)
+│   │   └── router.py           # Dynamic traffic router (A/B, Canary, Default)
+│   ├── simulate_ab_test.py     # Controlled A/B test simulation script
+│   ├── simulate_canary.py      # Multi-stage Canary rollout simulation with rollback
+│   └── README.md               # Serving architecture and deployment operations guide
 ├── src/
 │   └── mlops_bits/
-│       ├── __init__.py      # Public exports and entry points
-│       ├── api.py           # FastAPI production application
-│       ├── cli.py           # CLI runner (benchmark, serve, experiment)
-│       ├── config.py        # Decision thresholds and SLA parameters
-│       ├── detector.py      # Sub-millisecond fraud scoring engine
-│       ├── drift.py         # PSI distribution drift monitor
-│       ├── schemas.py       # Pydantic v2 schemas and boundary validations
+│       ├── __init__.py         # Public exports and entry points
+│       ├── api.py              # Core FastAPI application
+│       ├── cli.py              # CLI runner (benchmark, serve, experiment, gateway, worker, simulate)
+│       ├── config.py           # Decision thresholds and SLA parameters
+│       ├── detector.py         # Sub-millisecond fraud scoring engine
+│       ├── drift.py            # PSI distribution drift monitor
+│       ├── schemas.py          # Pydantic v2 schemas and boundary validations
 │       └── pipeline/
 │           ├── __init__.py
-│           ├── prepare.py   # DVC stage: reproducible transaction generation
-│           └── evaluate.py  # DVC stage: model evaluation & PSI metrics
+│           ├── prepare.py      # DVC stage: reproducible transaction generation
+│           └── evaluate.py     # DVC stage: model evaluation & PSI metrics
 ├── tests/
 │   ├── __init__.py
-│   ├── conftest.py          # Shared fixtures (transactions & distributions)
-│   ├── test_api.py          # FastAPI endpoint integration tests
-│   ├── test_detector.py     # Unit logic and boundary constraint tests
-│   ├── test_drift.py        # Statistical drift and PSI tests
-│   ├── test_experiments.py  # MLflow experiment tracking & logging tests
-│   ├── test_latency.py      # Low-latency SLA benchmarks (<5ms p99)
-│   ├── test_pipeline.py     # DVC pipeline stage unit tests
-│   └── test_main.py         # CLI sanity test
-├── dvc.yaml                 # DVC pipeline definition (prepare -> evaluate)
-├── dvc.lock                 # Cryptographic pipeline state lockfile
-├── params.yaml              # Hyperparameters and pipeline configuration
-├── metrics.json             # DVC evaluation metrics artifact
-├── mlflow.db                # SQLite MLflow tracking backend
-├── pyproject.toml           # Project packaging & dependencies
-├── uv.lock                  # Deterministic lockfile
+│   ├── conftest.py             # Shared fixtures (transactions & distributions)
+│   ├── test_api.py             # FastAPI endpoint integration tests
+│   ├── test_detector.py        # Unit logic and boundary constraint tests
+│   ├── test_drift.py           # Statistical drift and PSI tests
+│   ├── test_experiments.py     # MLflow experiment tracking & logging tests
+│   ├── test_latency.py         # Low-latency SLA benchmarks (<5ms p99)
+│   ├── test_pipeline.py        # DVC pipeline stage unit tests
+│   ├── test_serving.py         # Serving, BentoML, Gateway, A/B, Canary, & Worker tests
+│   └── test_main.py            # CLI sanity test
+├── Dockerfile.gateway          # Production Gateway container
+├── Dockerfile.model            # Production Model serving container
+├── Dockerfile.worker           # Production Async Worker container
+├── docker-compose.yml          # Multi-container production stack (Gateway, Models, Redis, Portainer)
+├── .dockerignore               # Build context optimization
+├── dvc.yaml                    # DVC pipeline definition (prepare -> evaluate)
+├── dvc.lock                    # Cryptographic pipeline state lockfile
+├── params.yaml                 # Hyperparameters and pipeline configuration
+├── metrics.json                # DVC evaluation metrics artifact
+├── mlflow.db                   # SQLite MLflow tracking backend
+├── pyproject.toml              # Project packaging & dependencies
+├── uv.lock                     # Deterministic lockfile
 └── README.md
 ```

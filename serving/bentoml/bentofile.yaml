@@ -1,0 +1,19 @@
+service: "serving.bentoml.service:FraudDetectionService"
+labels:
+  owner: "mlops-bits"
+  project: "fraud-detection"
+  task: "sub-millisecond-risk-scoring"
+include:
+  - "src/mlops_bits/"
+  - "serving/bentoml/"
+  - "pyproject.toml"
+  - "README.md"
+python:
+  packages:
+    - "fastapi>=0.162.0"
+    - "pydantic>=2.14.0"
+    - "pyyaml>=6.0.3"
+    - "uvicorn>=0.54.0"
+    - "scikit-learn>=1.9.0"
+    - "pandas>=3.1.0"
+    - "numpy>=2.5.0"

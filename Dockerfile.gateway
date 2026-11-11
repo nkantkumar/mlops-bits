@@ -1,0 +1,27 @@
+# Multi-stage production container for Unified API Gateway
+FROM python:3.14-slim AS base
+
+WORKDIR /app
+
+# Install uv for fast, deterministic dependency resolution
+COPY --from=ghcr.io/astral-sh/uv:0.12.7 /uv /uvx /bin/
+
+# Copy dependency specifications first to leverage layer caching
+COPY pyproject.toml uv.lock ./
+RUN uv sync --frozen --no-dev
+
+# Copy application source and serving modules
+COPY src/ ./src/
+COPY serving/ ./serving/
+COPY params.yaml ./
+
+ENV PATH="/app/.venv/bin:$PATH"
+ENV PYTHONPATH="/app:/app/src"
+ENV PYTHONUNBUFFERED=1
+
+EXPOSE 8000
+
+HEALTHCHECK --interval=10s --timeout=3s --retries=3 \
+  CMD curl -f http://localhost:8000/health || exit 1
+
+CMD ["uv", "run", "uvicorn", "serving.gateway.app:app", "--host", "0.0.0.0", "--port", "8000"]

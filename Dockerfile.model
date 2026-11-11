@@ -1,0 +1,24 @@
+# Production container for individual model microservices
+FROM python:3.14-slim AS base
+
+WORKDIR /app
+
+COPY --from=ghcr.io/astral-sh/uv:0.12.7 /uv /uvx /bin/
+
+COPY pyproject.toml uv.lock ./
+RUN uv sync --frozen --no-dev
+
+COPY src/ ./src/
+COPY serving/ ./serving/
+COPY params.yaml ./
+
+ENV PATH="/app/.venv/bin:$PATH"
+ENV PYTHONPATH="/app:/app/src"
+ENV PYTHONUNBUFFERED=1
+
+ARG MODEL_PORT=8001
+ENV MODEL_PORT=${MODEL_PORT}
+
+EXPOSE ${MODEL_PORT}
+
+CMD uv run uvicorn mlops_bits.api:app --host 0.0.0.0 --port ${MODEL_PORT}

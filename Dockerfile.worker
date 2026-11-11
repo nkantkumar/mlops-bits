@@ -1,0 +1,19 @@
+# Production container for Redis Async Prediction Worker
+FROM python:3.14-slim AS base
+
+WORKDIR /app
+
+COPY --from=ghcr.io/astral-sh/uv:0.12.7 /uv /uvx /bin/
+
+COPY pyproject.toml uv.lock ./
+RUN uv sync --frozen --no-dev
+
+COPY src/ ./src/
+COPY serving/ ./serving/
+COPY params.yaml ./
+
+ENV PATH="/app/.venv/bin:$PATH"
+ENV PYTHONPATH="/app:/app/src"
+ENV PYTHONUNBUFFERED=1
+
+CMD ["uv", "run", "python", "-m", "serving.async_worker.worker"]

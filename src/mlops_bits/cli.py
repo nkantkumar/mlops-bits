@@ -132,6 +132,34 @@ def main(argv: list[str] | None = None) -> None:
         help="Random seed for reproducibility (default: 42)",
     )
 
+    # Gateway command
+    gw_parser = subparsers.add_parser("gateway", help="Start the Unified API Gateway")
+    gw_parser.add_argument(
+        "--host", default="0.0.0.0", help="Bind host (default: 0.0.0.0)"
+    )
+    gw_parser.add_argument(
+        "--port", type=int, default=8000, help="Bind port (default: 8000)"
+    )
+    gw_parser.add_argument(
+        "--reload", action="store_true", help="Enable dev auto-reload"
+    )
+
+    # Worker command
+    worker_parser = subparsers.add_parser(
+        "worker", help="Start the Redis-backed async prediction worker"
+    )
+    worker_parser.add_argument("--redis-url", default=None, help="Redis connection URL")
+
+    # Simulate command
+    sim_parser = subparsers.add_parser(
+        "simulate", help="Simulate Canary rollout or A/B testing"
+    )
+    sim_parser.add_argument(
+        "scenario",
+        choices=["canary", "ab-test"],
+        help="Simulation scenario to execute",
+    )
+
     args = parser.parse_args(argv)
 
     if args.command == "benchmark":
@@ -143,6 +171,51 @@ def main(argv: list[str] | None = None) -> None:
         uvicorn.run(
             "mlops_bits.api:app", host=args.host, port=args.port, reload=args.reload
         )
+    elif args.command == "gateway":
+        from pathlib import Path
+
+        repo_root = str(Path(__file__).resolve().parent.parent.parent)
+        if repo_root not in sys.path:
+            sys.path.insert(0, repo_root)
+
+        import uvicorn
+
+        print(f"Starting Unified API Gateway on {args.host}:{args.port}...")
+        uvicorn.run(
+            "serving.gateway.app:app",
+            host=args.host,
+            port=args.port,
+            reload=args.reload,
+        )
+    elif args.command == "worker":
+        from pathlib import Path
+
+        repo_root = str(Path(__file__).resolve().parent.parent.parent)
+        if repo_root not in sys.path:
+            sys.path.insert(0, repo_root)
+
+        from serving.async_worker.queue import JobQueueManager
+        from serving.async_worker.worker import AsyncPredictionWorker
+
+        print("Starting Async Prediction Worker...")
+        queue_mgr = JobQueueManager(redis_url=args.redis_url)
+        worker = AsyncPredictionWorker(queue_manager=queue_mgr)
+        worker.run()
+    elif args.command == "simulate":
+        from pathlib import Path
+
+        repo_root = str(Path(__file__).resolve().parent.parent.parent)
+        if repo_root not in sys.path:
+            sys.path.insert(0, repo_root)
+
+        if args.scenario == "canary":
+            from serving.simulate_canary import simulate_canary_rollout
+
+            simulate_canary_rollout()
+        elif args.scenario == "ab-test":
+            from serving.simulate_ab_test import run_ab_test_simulation
+
+            run_ab_test_simulation()
     elif args.command == "experiment":
         from pathlib import Path
 
