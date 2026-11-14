@@ -54,7 +54,7 @@ class MultiModelClient:
         url = f"{base_url.rstrip('/')}/v1/predict"
         t0 = time.perf_counter_ns()
         with httpx.Client(timeout=2.0) as client:
-            resp = client.post(url, json=req.model_dump())
+            resp = client.post(url, json=req.model_dump(mode="json"))
             resp.raise_for_status()
             elapsed_ms = (time.perf_counter_ns() - t0) / 1_000_000.0
             data = resp.json()

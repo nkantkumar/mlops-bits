@@ -227,8 +227,6 @@ def generate_evidently_drift_report(
     req: EvidentlyReportRequest | None = None,
 ) -> EvidentlyDriftSummary:
     """Generate an Evidently Data Drift Report across live Gateway production traffic."""
-    from pathlib import Path
-
     payload = req or EvidentlyReportRequest()
     ref_df = (
         InferenceTelemetryCollector.load_reference_dataset(payload.reference_path)

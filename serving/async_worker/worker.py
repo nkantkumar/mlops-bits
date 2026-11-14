@@ -44,7 +44,7 @@ class AsyncPredictionWorker:
             res = self.detector.predict(req)
             elapsed_ms = (time.perf_counter_ns() - t0) / 1_000_000.0
 
-            result_dict: dict[str, Any] = res.model_dump()
+            result_dict: dict[str, Any] = res.model_dump(mode="json")
             self.queue_mgr.complete_job(
                 job_id=job_id,
                 result=result_dict,
