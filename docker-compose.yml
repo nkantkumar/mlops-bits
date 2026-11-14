@@ -116,6 +116,23 @@ services:
     networks:
       - mlops_network
 
+  # ===========================================================================
+  # 7. Evidently AI Observability Dashboard: Real-time Data Drift & Quality UI
+  # ===========================================================================
+  evidently-ui:
+    build:
+      context: .
+      dockerfile: Dockerfile.evidently
+    container_name: mlops_evidently_ui
+    restart: unless-stopped
+    ports:
+      - "8003:8003"
+    volumes:
+      - "./workspace:/app/workspace"
+      - "./reports:/app/reports"
+    networks:
+      - mlops_network
+
 volumes:
   portainer_data:
   redis_data:

@@ -160,6 +160,63 @@ def main(argv: list[str] | None = None) -> None:
         help="Simulation scenario to execute",
     )
 
+    # Monitor command (Evidently AI)
+    mon_parser = subparsers.add_parser(
+        "monitor", help="Evidently AI data drift, quality monitoring, and UI"
+    )
+    mon_subparsers = mon_parser.add_subparsers(
+        dest="monitor_action", help="Monitoring action (report, test, ui)"
+    )
+
+    # monitor report
+    rep_parser = mon_subparsers.add_parser(
+        "report", help="Generate Evidently Data Drift & Quality report"
+    )
+    rep_parser.add_argument(
+        "--baseline", default="data/raw/transactions.csv", help="Baseline dataset CSV"
+    )
+    rep_parser.add_argument("--current", default=None, help="Current dataset CSV")
+    rep_parser.add_argument(
+        "--drift-share",
+        type=float,
+        default=0.30,
+        help="Drift share alert threshold (default: 0.30)",
+    )
+    rep_parser.add_argument(
+        "--workspace",
+        default="workspace",
+        help="Evidently workspace path (default: workspace)",
+    )
+    rep_parser.add_argument(
+        "--output-dir", default="reports/evidently", help="Report output directory"
+    )
+
+    # monitor test
+    test_parser = mon_subparsers.add_parser(
+        "test", help="Run Evidently automated Test Suite for CI/CD gating"
+    )
+    test_parser.add_argument(
+        "--baseline", default="data/raw/transactions.csv", help="Baseline dataset CSV"
+    )
+    test_parser.add_argument("--current", default=None, help="Current dataset CSV")
+    test_parser.add_argument(
+        "--fail-on-error", action="store_true", help="Exit with code 1 if tests fail"
+    )
+
+    # monitor ui
+    ui_parser = mon_subparsers.add_parser(
+        "ui", help="Launch Evidently UI dashboard server"
+    )
+    ui_parser.add_argument(
+        "--host", default="0.0.0.0", help="Bind host (default: 0.0.0.0)"
+    )
+    ui_parser.add_argument(
+        "--port", type=int, default=8003, help="Bind port (default: 8003)"
+    )
+    ui_parser.add_argument(
+        "--workspace", default="workspace", help="Workspace path (default: workspace)"
+    )
+
     args = parser.parse_args(argv)
 
     if args.command == "benchmark":
@@ -232,6 +289,119 @@ def main(argv: list[str] | None = None) -> None:
             test_size=args.test_size,
             seed=args.seed,
         )
+    elif args.command == "monitor":
+        from pathlib import Path
+
+        repo_root = str(Path(__file__).resolve().parent.parent.parent)
+        if repo_root not in sys.path:
+            sys.path.insert(0, repo_root)
+
+        from mlops_bits.monitoring import (
+            EvidentlyMonitor,
+            InferenceTelemetryCollector,
+            MonitoringConfig,
+        )
+
+        if args.monitor_action == "ui":
+            print(
+                f"🌐 Starting Evidently UI Dashboard on http://{args.host}:{args.port} (Workspace: {args.workspace})..."
+            )
+            import subprocess
+
+            subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "evidently",
+                    "ui",
+                    "--host",
+                    args.host,
+                    "--port",
+                    str(args.port),
+                    "--workspace",
+                    args.workspace,
+                ],
+                check=False,
+            )
+        elif args.monitor_action == "test":
+            print(
+                f"🧪 Running Evidently Test Suite against baseline {args.baseline}..."
+            )
+            ref_df = InferenceTelemetryCollector.load_reference_dataset(args.baseline)
+            if args.current:
+                curr_df = InferenceTelemetryCollector.load_reference_dataset(
+                    args.current
+                )
+            else:
+                curr_df = ref_df.iloc[len(ref_df) // 2 :].copy()
+                ref_df = ref_df.iloc[: len(ref_df) // 2].copy()
+
+            monitor = EvidentlyMonitor()
+            res = monitor.run_drift_test_suite(
+                reference_data=ref_df, current_data=curr_df, save_html=True
+            )
+            print("=" * 60)
+            print("🧪 EVIDENTLY AUTOMATED TEST SUITE SUMMARY")
+            print("=" * 60)
+            print(f"All Passed    : {'✅ YES' if res.all_passed else '❌ NO'}")
+            print(f"Total Tests   : {res.total_tests}")
+            print(f"Passed Tests  : {res.passed_tests}")
+            print(f"Failed Tests  : {res.failed_tests}")
+            print(f"HTML Report   : {res.report_html_path}")
+            print("=" * 60)
+            for t in res.test_details:
+                icon = "✅" if t.status == "SUCCESS" else "❌"
+                print(f"  {icon} [{t.status}] {t.name}: {t.description}")
+            if getattr(args, "fail_on_error", False) and not res.all_passed:
+                sys.exit(1)
+        else:
+            # Default to report
+            baseline = getattr(args, "baseline", "data/raw/transactions.csv")
+            current = getattr(args, "current", None)
+            drift_share = getattr(args, "drift_share", 0.30)
+            out_dir = getattr(args, "output_dir", "reports/evidently")
+            ws_dir = getattr(args, "workspace", "workspace")
+
+            print(
+                f"📊 Running Evidently Data Drift Analysis (Threshold: {drift_share:.1%})..."
+            )
+            ref_df = InferenceTelemetryCollector.load_reference_dataset(baseline)
+            if current:
+                curr_df = InferenceTelemetryCollector.load_reference_dataset(current)
+            else:
+                curr_df = ref_df.iloc[len(ref_df) // 2 :].copy()
+                ref_df = ref_df.iloc[: len(ref_df) // 2].copy()
+
+            monitor = EvidentlyMonitor(
+                MonitoringConfig(
+                    drift_share_threshold=drift_share,
+                    reports_dir=out_dir,
+                    workspace_dir=ws_dir,
+                )
+            )
+            summary = monitor.generate_data_drift_report(
+                reference_data=ref_df,
+                current_data=curr_df,
+                save_html=True,
+                save_json=True,
+                sync_workspace=True,
+            )
+            print("=" * 60)
+            print("📈 EVIDENTLY DATA DRIFT REPORT SUMMARY")
+            print("=" * 60)
+            print(
+                f"Drift Status       : {'🚨 DRIFT DETECTED' if summary.drift_detected else '✅ NO DRIFT'}"
+            )
+            print(f"Drift Share        : {summary.drift_share:.1%}")
+            print(
+                f"Drifted Features   : {summary.drifted_features_count} / {summary.total_features}"
+            )
+            if summary.drifted_features:
+                print(f"Drifted Columns    : {', '.join(summary.drifted_features)}")
+            print(f"HTML Report        : {summary.report_html_path}")
+            print(f"JSON Report        : {summary.report_json_path}")
+            print(f"Workspace Snapshot : {summary.snapshot_id}")
+            print("=" * 60)
     else:
         # Default behavior when run with no arguments: print greeting and quick benchmark
         print("Hello from mlops-bits! Enterprise Fraud Detection Module.")

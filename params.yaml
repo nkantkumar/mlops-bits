@@ -8,3 +8,9 @@ evaluate:
   input_path: "data/raw/transactions.csv"
   drift_num_bins: 10
   metrics_output: "metrics.json"
+
+monitoring:
+  drift_share_threshold: 0.30
+  stat_test_threshold: 0.05
+  reports_dir: "reports/evidently"
+  workspace_dir: "workspace"

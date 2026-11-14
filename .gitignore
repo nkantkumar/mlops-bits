@@ -22,3 +22,7 @@ wheels/
 # MLflow
 mlruns/
 mlartifacts/
+
+# Evidently monitoring artifacts
+reports/
+workspace/

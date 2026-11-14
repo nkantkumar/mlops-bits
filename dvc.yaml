@@ -17,11 +17,16 @@ stages:
       - data/raw/transactions.csv
       - src/mlops_bits/detector.py
       - src/mlops_bits/drift.py
+      - src/mlops_bits/monitoring/service.py
       - src/mlops_bits/pipeline/evaluate.py
     params:
       - evaluate.drift_num_bins
       - evaluate.input_path
       - evaluate.metrics_output
+      - monitoring.drift_share_threshold
+      - monitoring.reports_dir
+      - monitoring.stat_test_threshold
+      - monitoring.workspace_dir
     metrics:
       - metrics.json:
           cache: false

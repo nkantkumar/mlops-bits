@@ -12,17 +12,18 @@ import yaml
 from mlops_bits.config import FraudDetectorConfig
 from mlops_bits.detector import LowLatencyFraudDetector
 from mlops_bits.drift import DistributionDriftMonitor
+from mlops_bits.monitoring import EvidentlyMonitor, MonitoringConfig
 from mlops_bits.schemas import DriftAnalysisRequest, RiskDecision, TransactionRequest
 
 
-def load_params() -> dict[str, Any]:
-    """Load configuration parameters from params.yaml."""
+def load_params() -> tuple[dict[str, Any], dict[str, Any]]:
+    """Load evaluation and monitoring parameters from params.yaml."""
     params_file = Path("params.yaml")
     if not params_file.exists():
         raise FileNotFoundError(f"Missing {params_file}")
     with open(params_file, "r", encoding="utf-8") as f:
         params: dict[str, Any] = yaml.safe_load(f)
-    return params.get("evaluate", {})
+    return params.get("evaluate", {}), params.get("monitoring", {})
 
 
 def load_transactions_from_csv(csv_path: Path) -> list[TransactionRequest]:
@@ -48,10 +49,10 @@ def load_transactions_from_csv(csv_path: Path) -> list[TransactionRequest]:
 
 def main() -> None:
     """Execute evaluation and drift analysis stage."""
-    params = load_params()
-    input_path = Path(params.get("input_path", "data/raw/transactions.csv"))
-    metrics_path = Path(params.get("metrics_output", "metrics.json"))
-    drift_bins = int(params.get("drift_num_bins", 10))
+    eval_params, mon_params = load_params()
+    input_path = Path(eval_params.get("input_path", "data/raw/transactions.csv"))
+    metrics_path = Path(eval_params.get("metrics_output", "metrics.json"))
+    drift_bins = int(eval_params.get("drift_num_bins", 10))
 
     if not input_path.exists():
         raise FileNotFoundError(f"Data input file not found: {input_path}")
@@ -62,6 +63,13 @@ def main() -> None:
 
     detector = LowLatencyFraudDetector(FraudDetectorConfig())
     drift_monitor = DistributionDriftMonitor()
+    mon_config = MonitoringConfig(
+        drift_share_threshold=float(mon_params.get("drift_share_threshold", 0.30)),
+        stat_test_threshold=float(mon_params.get("stat_test_threshold", 0.05)),
+        reports_dir=str(mon_params.get("reports_dir", "reports/evidently")),
+        workspace_dir=str(mon_params.get("workspace_dir", "workspace")),
+    )
+    evidently_monitor = EvidentlyMonitor(mon_config)
 
     # 1. Warm-up
     for _ in range(25):
@@ -111,6 +119,23 @@ def main() -> None:
         )
     )
 
+    # 4. Evidently AI Full Feature Data Drift & Test Suite
+    print("📈 Running Evidently AI Data Drift & Quality Evaluation...")
+    ref_tx = transactions[: max(1, total_tx // 2)]
+    curr_tx = transactions[max(1, total_tx // 2) :]
+    evidently_drift = evidently_monitor.generate_data_drift_report(
+        reference_data=ref_tx,
+        current_data=curr_tx,
+        save_html=True,
+        save_json=True,
+        sync_workspace=True,
+    )
+    evidently_suite = evidently_monitor.run_drift_test_suite(
+        reference_data=ref_tx,
+        current_data=curr_tx,
+        save_html=True,
+    )
+
     metrics_data = {
         "total_transactions": total_tx,
         "fraud_count": fraud_count,
@@ -131,6 +156,12 @@ def main() -> None:
         "amount_psi": drift_report.psi,
         "drift_status": drift_report.drift_status.value,
         "drift_alert": drift_report.alert_triggered,
+        "evidently_drift_detected": evidently_drift.drift_detected,
+        "evidently_drift_share": evidently_drift.drift_share,
+        "evidently_drifted_features_count": evidently_drift.drifted_features_count,
+        "evidently_test_suite_passed": evidently_suite.all_passed,
+        "evidently_passed_tests": evidently_suite.passed_tests,
+        "evidently_total_tests": evidently_suite.total_tests,
     }
 
     metrics_path.parent.mkdir(parents=True, exist_ok=True)

@@ -17,9 +17,10 @@ Production-grade, low-latency fraud detection module and statistical drift monit
   - $\text{PSI} < 0.10$: `NO_DRIFT`
   - $0.10 \le \text{PSI} < 0.25$: `MODERATE_DRIFT`
   - $\text{PSI} \ge 0.25$: `SIGNIFICANT_DRIFT` (triggers automated alert)
+- **Evidently AI Observability & Monitoring**: Full-fledged production monitoring with automated Data Drift reports, Data Quality integrity metrics, CI/CD automated Test Suites, live inference streaming telemetry collector, interactive HTML visual dashboards, and Evidently UI Workspace on port `:8003`.
 - **Data Version Control (DVC)**: Reproducible MLOps pipeline tracking data generation, model evaluation, metrics, and Google Drive remote storage.
 - **Deterministic Packaging & Build**: Modern PEP 517/621 packaging with `pyproject.toml`, pinned lockfile `uv.lock`, and distribution builds (`uv build`).
-- **Rigorous Testing**: 25 comprehensive pytest tests covering unit logic, boundary validations, drift thresholds, pipeline stages, and sub-millisecond SLA performance.
+- **Rigorous Testing**: 43 comprehensive pytest tests covering unit logic, boundary validations, drift thresholds, pipeline stages, sub-millisecond SLA performance, and Evidently reports/test-suites.
 
 ---
 
@@ -352,6 +353,7 @@ A complete multi-container production stack is defined in [`docker-compose.yml`]
 | **`model-challenger`**| `:8002` | `Dockerfile.model` | Candidate Model Variant |
 | **`redis`** | `:6379` | `redis:7-alpine` | Async Prediction Job Queue |
 | **`async-worker`** | N/A | `Dockerfile.worker` | Background Processing Engine |
+| **`evidently-ui`** | `:8003` | `Dockerfile.evidently` | Evidently AI Observability Dashboard & Workspace |
 
 #### Deploying with Docker Compose:
 
@@ -364,12 +366,122 @@ docker compose ps
 
 # View gateway logs
 docker compose logs -f gateway
+
+# View Evidently UI logs
+docker compose logs -f evidently-ui
 ```
 
 #### Managing via Portainer:
 1. Open your browser to **http://localhost:9000**.
 2. Set your admin credentials upon initial launch.
 3. Access the **local** Docker environment to monitor container health, restart services, inspect logs, and manage CPU/memory allocations visually.
+
+#### Monitoring via Evidently UI Dashboard:
+1. Open your browser to **http://localhost:8003**.
+2. View historical drift runs, test suite executions, dataset distributions, and project dashboards.
+
+---
+
+## Evidently AI Observability & Monitoring
+
+`mlops-bits` includes a full-fledged monitoring and observability subsystem powered by [Evidently AI](https://evidentlyai.com/). It provides statistical data drift detection, data quality profiling, automated test suites for deployment gates, live inference telemetry capture, standalone interactive HTML visual reports, and an interactive Evidently UI workspace.
+
+```text
+                           ┌──────────────────────────────┐
+                           │   Unified API Gateway        │
+                           │   (Port 8000 / Live Scoring) │
+                           └──────────────┬───────────────┘
+                                          │ [Telemetry Ingestion]
+                                          ▼
+                           ┌──────────────────────────────┐
+                           │ InferenceTelemetryCollector  │
+                           │ (Thread-Safe Ring Buffer)    │
+                           └──────────────┬───────────────┘
+                                          │
+                     ┌────────────────────┴────────────────────┐
+                     ▼                                         ▼
+         ┌─────────────────────────┐               ┌─────────────────────────┐
+         │ Evidently Data Drift    │               │ Automated Test Suite    │
+         │ (K-S, Chi-Square, PSI)  │               │ (CI/CD Deployment Gate) │
+         └───────────┬─────────────┘               └───────────┬─────────────┘
+                     │                                         │
+                     └────────────────────┬────────────────────┘
+                                          │
+                                          ▼
+                           ┌──────────────────────────────┐
+                           │ Evidently UI Workspace &     │
+                           │ Interactive HTML Reports     │
+                           │ (Dashboard on Port 8003)     │
+                           └──────────────────────────────┘
+```
+
+### 1. Key Capabilities
+- **Feature-Level Data Drift**: Evaluates statistical drift across all inference inputs (`amount`, `velocity_1h`, `device_trust_score`, `merchant_category`, `location_country`, `billing_country`) using calibrated hypothesis tests (Kolmogorov-Smirnov for numerical, Chi-Square/Z-test for categorical).
+- **Data Quality & Integrity Profiling**: Analyzes row counts, column counts, missing values, duplicates, and statistical quantiles.
+- **Automated Test Suites for CI/CD Gates**: Evaluates pre-configured assertions (`DataDriftTestPreset`, `DataQualityTestPreset`) with granular pass/fail verdicts and reason descriptions. Exits with code `1` on failure to block degraded canary deployments.
+- **Live Inference Telemetry Buffer**: Automatically records incoming live production predictions in an in-memory sliding ring buffer (`InferenceTelemetryCollector`) without adding latency to inference calls.
+- **Multiple Output Formats**:
+  - Interactive standalone HTML reports (`reports/evidently/data_drift_latest.html`)
+  - Structured JSON metrics (`reports/evidently/data_drift_latest.json`)
+  - Continuous snapshot runs registered into Evidently Workspace (`workspace/`)
+  - Integration with DVC (`metrics.json`) and MLflow (`mlflow.log_artifact`)
+
+### 2. CLI Monitoring Commands
+Run monitoring and observability workflows directly from the command line:
+
+```bash
+# Generate Data Drift & Quality HTML and JSON reports
+uv run mlops-bits monitor report
+
+# Run report against custom baseline and current CSVs with custom drift threshold
+uv run mlops-bits monitor report \
+  --baseline data/raw/transactions.csv \
+  --current data/raw/drifted_transactions.csv \
+  --drift-share 0.25
+
+# Run automated Evidently Test Suite (ideal for CI/CD pipelines & deployment gates)
+uv run mlops-bits monitor test
+
+# Run test suite and fail with exit code 1 if any assertions fail
+uv run mlops-bits monitor test --fail-on-error
+
+# Launch the Evidently UI Monitoring Dashboard server
+uv run mlops-bits monitor ui --port 8003 --workspace workspace
+```
+
+### 3. API Monitoring Endpoints
+Both the FastAPI Model Server (`mlops_bits.api:app`) and Unified API Gateway (`serving.gateway.app:app`) expose Evidently monitoring endpoints:
+
+- **`POST /v1/monitor/evidently/report`**: Computes data drift between baseline reference data and recent live inference telemetry.
+- **`POST /v1/monitor/evidently/test-suite`**: Runs automated assertion tests for deployment gating.
+- **`GET /v1/monitor/evidently/summary`**: Operational health and buffer status of the monitoring engine.
+- **`GET /v1/monitor/evidently/report.html`**: Serves the latest interactive HTML report directly to the web browser.
+- **`POST /v1/monitor/evidently/collect`**: Manually push externally scored transactions into the telemetry buffer.
+
+### 4. DVC Pipeline Integration
+Evidently drift share and test suite metrics are automatically tracked in the DVC pipeline:
+
+```bash
+# Reproduce pipeline evaluation with Evidently
+uv run dvc repro evaluate
+
+# View all evaluation and Evidently drift metrics
+uv run dvc metrics show
+```
+
+### 5. MLflow Experiment Tracking
+During model training and comparative benchmarking (`experiments/run_experiment.py`), Evidently HTML reports and drift metrics are logged as first-class MLflow artifacts under `artifact_path="evidently"` and tracked across models in the MLflow UI.
+
+### 6. Docker Compose Service
+The Evidently UI service runs as a containerized dashboard in the stack:
+
+```bash
+# Start all services including Evidently UI
+docker compose up -d
+
+# Open Evidently UI Dashboard in your browser:
+# http://localhost:8003
+```
 
 ---
 
@@ -408,30 +520,38 @@ mlops-bits/
 │   └── mlops_bits/
 │       ├── __init__.py         # Public exports and entry points
 │       ├── api.py              # Core FastAPI application
-│       ├── cli.py              # CLI runner (benchmark, serve, experiment, gateway, worker, simulate)
+│       ├── cli.py              # CLI runner (benchmark, serve, experiment, gateway, worker, simulate, monitor)
 │       ├── config.py           # Decision thresholds and SLA parameters
 │       ├── detector.py         # Sub-millisecond fraud scoring engine
 │       ├── drift.py            # PSI distribution drift monitor
 │       ├── schemas.py          # Pydantic v2 schemas and boundary validations
+│       ├── monitoring/         # Evidently AI observability and drift package
+│       │   ├── __init__.py
+│       │   ├── collector.py    # Thread-safe sliding ring buffer for live inference
+│       │   ├── config.py       # Monitoring thresholds and directories
+│       │   ├── schemas.py      # Evidently drift and test suite schemas
+│       │   └── service.py      # EvidentlyMonitor core engine & workspace sync
 │       └── pipeline/
 │           ├── __init__.py
 │           ├── prepare.py      # DVC stage: reproducible transaction generation
-│           └── evaluate.py     # DVC stage: model evaluation & PSI metrics
+│           └── evaluate.py     # DVC stage: model evaluation, PSI & Evidently metrics
 ├── tests/
 │   ├── __init__.py
 │   ├── conftest.py             # Shared fixtures (transactions & distributions)
 │   ├── test_api.py             # FastAPI endpoint integration tests
 │   ├── test_detector.py        # Unit logic and boundary constraint tests
 │   ├── test_drift.py           # Statistical drift and PSI tests
+│   ├── test_evidently.py       # Evidently AI drift, quality, test suite & API tests
 │   ├── test_experiments.py     # MLflow experiment tracking & logging tests
 │   ├── test_latency.py         # Low-latency SLA benchmarks (<5ms p99)
 │   ├── test_pipeline.py        # DVC pipeline stage unit tests
 │   ├── test_serving.py         # Serving, BentoML, Gateway, A/B, Canary, & Worker tests
 │   └── test_main.py            # CLI sanity test
+├── Dockerfile.evidently        # Production Evidently AI Observability UI container
 ├── Dockerfile.gateway          # Production Gateway container
 ├── Dockerfile.model            # Production Model serving container
 ├── Dockerfile.worker           # Production Async Worker container
-├── docker-compose.yml          # Multi-container production stack (Gateway, Models, Redis, Portainer)
+├── docker-compose.yml          # Multi-container production stack (Gateway, Models, Redis, Portainer, Evidently UI)
 ├── .dockerignore               # Build context optimization
 ├── dvc.yaml                    # DVC pipeline definition (prepare -> evaluate)
 ├── dvc.lock                    # Cryptographic pipeline state lockfile

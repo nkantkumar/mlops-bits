@@ -4,12 +4,18 @@
   "approval_rate": 0.95,
   "review_rate": 0.0,
   "reject_rate": 0.05,
-  "mean_latency_ms": 0.0027,
-  "p95_latency_ms": 0.003,
-  "p99_latency_ms": 0.0043,
-  "throughput_req_per_s": 326962.2,
+  "mean_latency_ms": 0.0029,
+  "p95_latency_ms": 0.0031,
+  "p99_latency_ms": 0.0049,
+  "throughput_req_per_s": 305180.4,
   "sla_passed": true,
   "amount_psi": 0.1599,
   "drift_status": "MODERATE_DRIFT",
-  "drift_alert": false
+  "drift_alert": false,
+  "evidently_drift_detected": false,
+  "evidently_drift_share": 0.2857,
+  "evidently_drifted_features_count": 2,
+  "evidently_test_suite_passed": false,
+  "evidently_passed_tests": 6,
+  "evidently_total_tests": 8
 }

@@ -56,6 +56,7 @@ from sklearn.preprocessing import OneHotEncoder, StandardScaler
 from mlops_bits.config import FraudDetectorConfig
 from mlops_bits.detector import LowLatencyFraudDetector
 from mlops_bits.drift import DistributionDriftMonitor
+from mlops_bits.monitoring import EvidentlyMonitor, MonitoringConfig
 from mlops_bits.pipeline.prepare import generate_transactions
 from mlops_bits.schemas import DriftAnalysisRequest, TransactionRequest
 
@@ -390,6 +391,7 @@ def build_preprocessor(
 def run_detector_experiment(
     df_test: pd.DataFrame,
     temp_dir: Path,
+    evidently_artifacts: dict[str, Any] | None = None,
 ) -> RunSummary:
     """Evaluate and log the production LowLatencyFraudDetector rule & logit engine."""
     run_name = "LowLatencyFraudDetector-CalibratedEngine"
@@ -520,6 +522,17 @@ def run_detector_experiment(
             json.dump(all_metrics, f, indent=2)
         mlflow.log_artifact(str(metrics_path), artifact_path="reports")
 
+        # Artifacts: Evidently AI Monitoring & Drift Reports
+        if evidently_artifacts:
+            drift_html = evidently_artifacts.get("drift_html")
+            if drift_html and Path(drift_html).exists():
+                mlflow.log_artifact(str(drift_html), artifact_path="evidently")
+            suite_html = evidently_artifacts.get("suite_html")
+            if suite_html and Path(suite_html).exists():
+                mlflow.log_artifact(str(suite_html), artifact_path="evidently")
+            if evidently_artifacts.get("metrics"):
+                mlflow.log_metrics(evidently_artifacts["metrics"])
+
         # Log Model as MLflow PyFunc
         sample_input = df_test[
             [
@@ -585,6 +598,7 @@ def run_sklearn_experiment(
     X_test: pd.DataFrame,
     y_test: np.ndarray,
     temp_dir: Path,
+    evidently_artifacts: dict[str, Any] | None = None,
 ) -> RunSummary:
     """Train, evaluate, benchmark, and log a Scikit-Learn pipeline to MLflow."""
     print(f"\n🤖 Running Experiment Run: {model_name}...")
@@ -692,6 +706,17 @@ def run_sklearn_experiment(
         with open(metrics_path, "w", encoding="utf-8") as f:
             json.dump(all_metrics, f, indent=2)
         mlflow.log_artifact(str(metrics_path), artifact_path="reports")
+
+        # Artifacts: Evidently AI Monitoring & Drift Reports
+        if evidently_artifacts:
+            drift_html = evidently_artifacts.get("drift_html")
+            if drift_html and Path(drift_html).exists():
+                mlflow.log_artifact(str(drift_html), artifact_path="evidently")
+            suite_html = evidently_artifacts.get("suite_html")
+            if suite_html and Path(suite_html).exists():
+                mlflow.log_artifact(str(suite_html), artifact_path="evidently")
+            if evidently_artifacts.get("metrics"):
+                mlflow.log_metrics(evidently_artifacts["metrics"])
 
         # Log Model artifact with signature and input example
         sample_input = X_test.head(5)
@@ -842,11 +867,53 @@ def run_all_experiments(
     with tempfile.TemporaryDirectory() as tmp_str:
         temp_dir = Path(tmp_str)
 
+        # Generate Evidently AI Data Drift and Test Suite reports comparing train and test sets
+        print("📈 Running Evidently AI Data Drift & Quality Evaluation...")
+        evidently_dir = temp_dir / "evidently"
+        evidently_dir.mkdir(parents=True, exist_ok=True)
+        evidently_monitor = EvidentlyMonitor(
+            MonitoringConfig(
+                reports_dir=str(evidently_dir),
+                workspace_dir=str(temp_dir / "workspace"),
+            )
+        )
+        try:
+            evidently_drift = evidently_monitor.generate_data_drift_report(
+                reference_data=df.iloc[train_idx],
+                current_data=df.iloc[test_idx],
+                save_html=True,
+                save_json=True,
+                sync_workspace=False,
+            )
+            evidently_suite = evidently_monitor.run_drift_test_suite(
+                reference_data=df.iloc[train_idx],
+                current_data=df.iloc[test_idx],
+                save_html=True,
+            )
+            evidently_artifacts = {
+                "drift_html": evidently_drift.report_html_path,
+                "suite_html": evidently_suite.report_html_path,
+                "metrics": {
+                    "evidently_drift_detected": 1
+                    if evidently_drift.drift_detected
+                    else 0,
+                    "evidently_drift_share": evidently_drift.drift_share,
+                    "evidently_drifted_features": evidently_drift.drifted_features_count,
+                    "evidently_test_suite_passed": 1
+                    if evidently_suite.all_passed
+                    else 0,
+                },
+            }
+        except (ValueError, KeyError, RuntimeError, OSError) as exc:
+            print(f"⚠️ Evidently evaluation warning: {exc}")
+            evidently_artifacts = None
+
         # 1. LowLatencyFraudDetector (Production Rule & Calibrated Engine)
         if "detector" in selected_models:
             det_summary = run_detector_experiment(
                 df_test=df_test_full,
                 temp_dir=temp_dir,
+                evidently_artifacts=evidently_artifacts,
             )
             summaries.append(det_summary)
 
@@ -873,6 +940,7 @@ def run_all_experiments(
                 X_test=X_test,
                 y_test=y_test,
                 temp_dir=temp_dir,
+                evidently_artifacts=evidently_artifacts,
             )
             summaries.append(lr_summary)
 
@@ -900,6 +968,7 @@ def run_all_experiments(
                 X_test=X_test,
                 y_test=y_test,
                 temp_dir=temp_dir,
+                evidently_artifacts=evidently_artifacts,
             )
             summaries.append(rf_summary)
 

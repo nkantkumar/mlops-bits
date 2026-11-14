@@ -1,0 +1,26 @@
+# Multi-stage production container for Evidently AI Observability UI
+FROM python:3.14-slim AS base
+
+WORKDIR /app
+
+# Install uv for fast, deterministic dependency resolution
+COPY --from=ghcr.io/astral-sh/uv:0.12.7 /uv /uvx /bin/
+
+# Copy dependency specifications first to leverage layer caching
+COPY pyproject.toml uv.lock ./
+RUN uv sync --frozen --no-dev
+
+# Copy application source and configurations
+COPY src/ ./src/
+COPY params.yaml ./
+
+ENV PATH="/app/.venv/bin:$PATH"
+ENV PYTHONPATH="/app:/app/src"
+ENV PYTHONUNBUFFERED=1
+
+EXPOSE 8003
+
+HEALTHCHECK --interval=15s --timeout=5s --retries=3 \
+  CMD curl -f http://localhost:8003/ || exit 1
+
+CMD ["uv", "run", "evidently", "ui", "--host", "0.0.0.0", "--port", "8003", "--workspace", "/app/workspace"]
